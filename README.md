@@ -13,7 +13,7 @@ This project is a standalone Python 3 implementation for Raspberry Pi 4 device r
 - Retry network/server failures when running without `--once`.
 - Never print or store the token in source control or logs.
 
-Frame upload, audio upload, camera use, live streaming, and AI processing are intentionally not implemented.
+Frame upload is implemented. Audio upload, live streaming, and AI processing remain intentionally unimplemented.
 
 ## ESP32 registration contract
 
@@ -110,6 +110,68 @@ The continuous mode uses the ESP32 heartbeat contract:
 The payload does not include `deviceId`; the ESP32 firmware authenticates with the token and uses HTTP success status. The Raspberry Pi uses the loaded saved `deviceId` for logging and validation only.
 
 Stop continuous mode with `Ctrl+C` or `SIGTERM`. Failure responses and network errors are retried without deleting the saved identity or repeating registration. HTTP 401/403 is reported as authentication failure.
+
+## Install camera dependency on Raspberry Pi OS
+
+Use Raspberry Pi OS package management rather than pip for Picamera2:
+
+```bash
+sudo apt update
+sudo apt install -y python3-picamera2 python3-pil
+cd ~/DIPONeoCare/raspi
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+The OV5647 CSI camera must be enabled and visible to the Raspberry Pi OS camera stack.
+
+## Run Frame Upload
+
+Send one captured frame using the saved Raspberry Pi identity:
+
+```bash
+python3 main.py --frame-upload
+```
+
+Run the complete application with heartbeat and frame capture/upload:
+
+```bash
+python3 main.py
+```
+
+Frame upload uses:
+
+- Method: `POST`
+- Endpoint: `api/devices/upload/frame`
+- Header: `x-device-token`
+- Multipart fields: `macAddress`, `captureId`, `timestamp`
+- Multipart file field: `image`
+- Filename: `frame.jpg`
+- File content type: `image/jpeg`
+
+The queue is latest-first and bounded. The default capacity is one frame. A new capture supersedes and removes the oldest queued frame. Failed uploads retain the latest frame, while newer captures replace older retained frames. The uploader does not keep a growing offline backlog.
+
+## Frame configuration
+
+```env
+FRAME_CAPTURE_INTERVAL_SECONDS=1
+FRAME_UPLOAD_TIMEOUT_SECONDS=5
+FRAME_UPLOAD_RETRY_SECONDS=5
+FRAME_QUEUE_MAX_SIZE=1
+FRAME_IMAGE_FORMAT=jpeg
+FRAME_IMAGE_QUALITY=85
+FRAME_IMAGE_WIDTH=640
+FRAME_IMAGE_HEIGHT=480
+```
+
+Physical camera verification:
+
+```bash
+rpicam-hello --timeout 3000
+python3 main.py --frame-upload
+```
 
 ## Verify
 
