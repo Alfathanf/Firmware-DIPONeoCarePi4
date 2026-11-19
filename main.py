@@ -13,6 +13,9 @@ from camera.camera_manager import CameraError, CameraManager
 from frame.frame_queue import Frame, FrameQueue
 from frame.frame_capture import FrameCaptureManager
 from frame.frame_uploader import FrameUploader
+from audio.audio_queue import AudioQueue
+from audio.audio_recorder import AudioRecorder, AudioError
+from audio.audio_uploader import AudioUploader
 
 
 def configure_logging() -> None:
@@ -70,6 +73,41 @@ def run_frame_upload_once(settings, manager, registration, identity) -> int:
         return 1
 
 
+def run_audio_upload_once(settings, manager, identity) -> int:
+    queue = AudioQueue(
+        settings.audio_storage_dir,
+        settings.audio_queue_max_size,
+    )
+    recorder = AudioRecorder(
+        settings,
+        identity.mac_address,
+        queue,
+        threading.Event(),
+    )
+    try:
+        recording = recorder.record_once()
+        if not queue.put(recording):
+            logging.error("[AUDIO] Queue full; recording retained on disk")
+            return 1
+    except AudioError as exc:
+        logging.error("[AUDIO] Recording failed: %s", exc)
+        return 1
+
+    uploader = AudioUploader(
+        settings,
+        queue,
+        threading.Event(),
+        manager,
+    )
+    try:
+        if uploader.upload_one():
+            return 0
+        return 1
+    except Exception as exc:
+        logging.error("[AUDIO] Upload failed: %s", exc)
+        return 1
+
+
 def run_services(settings, manager, identity) -> int:
     heartbeat = HeartbeatService(settings, manager)
     frame_queue = FrameQueue(settings.frame_queue_max_size)
@@ -87,6 +125,22 @@ def run_services(settings, manager, identity) -> int:
         stop_event,
     )
     uploader = FrameUploader(settings, frame_queue, stop_event, manager)
+    audio_queue = AudioQueue(
+        settings.audio_storage_dir,
+        settings.audio_queue_max_size,
+    )
+    audio_recorder = AudioRecorder(
+        settings,
+        identity.mac_address,
+        audio_queue,
+        stop_event,
+    )
+    audio_uploader = AudioUploader(
+        settings,
+        audio_queue,
+        stop_event,
+        manager,
+    )
 
     def handle_stop(_signum, _frame) -> None:
         logging.info("[SHUTDOWN] Shutdown requested.")
@@ -111,14 +165,29 @@ def run_services(settings, manager, identity) -> int:
         name="frame-uploader",
         daemon=True,
     )
+    audio_capture_thread = threading.Thread(
+        target=audio_recorder.run,
+        name="audio-capture",
+        daemon=True,
+    )
+    audio_uploader_thread = threading.Thread(
+        target=audio_uploader.run,
+        name="audio-uploader",
+        daemon=True,
+    )
     heartbeat_thread.start()
     capture_thread.start()
     uploader_thread.start()
+    audio_capture_thread.start()
+    audio_uploader_thread.start()
 
     stop_event.wait()
     heartbeat_thread.join(timeout=2)
     capture_thread.join(timeout=2)
     uploader_thread.join(timeout=2)
+    audio_recorder.stop()
+    audio_capture_thread.join(timeout=5)
+    audio_uploader_thread.join(timeout=2)
     return 0
 
 
@@ -140,6 +209,11 @@ def parse_args() -> argparse.Namespace:
         "--frame-upload",
         action="store_true",
         help="Capture one frame and upload it once using saved identity",
+    )
+    parser.add_argument(
+        "--audio-upload",
+        action="store_true",
+        help="Record one WAV window and upload it once using saved identity",
     )
     return parser.parse_args()
 
@@ -172,6 +246,8 @@ def main() -> int:
         )
         if args.frame_upload:
             return run_frame_upload_once(settings, manager, registration, identity)
+        if args.audio_upload:
+            return run_audio_upload_once(settings, manager, identity)
         if args.heartbeat:
             heartbeat = HeartbeatService(settings, manager)
             try:
@@ -209,6 +285,11 @@ def main() -> int:
     if args.frame_upload:
         logging.error(
             "[FRAME] Saved Raspberry Pi identity is unavailable; --frame-upload does not register"
+        )
+        return 1
+    if args.audio_upload:
+        logging.error(
+            "[AUDIO] Saved Raspberry Pi identity is unavailable; --audio-upload does not register"
         )
         return 1
     while True:

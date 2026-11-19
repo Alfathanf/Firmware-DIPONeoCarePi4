@@ -175,6 +175,58 @@ python3 main.py --frame-upload
 
 Frame capture uses `Picamera2.capture_file()` with an in-memory `io.BytesIO` buffer and JPEG format. The implementation validates that the result starts with a JPEG SOI marker (`FF D8`) and ends with an EOI marker (`FF D9`) before placing it on the frame queue.
 
+## Audio Upload
+
+The Raspberry Pi records five-second mono WAV windows with `arecord`:
+
+```bash
+arecord -l
+arecord --list-devices
+arecord --dump-hw-params -D plughw -f S16_LE -r 16000 -c 1
+```
+
+Use `AUDIO_DEVICE` as an ALSA PCM name only when needed. Leave it empty for ALSA default device selection.
+
+Audio upload uses:
+
+- Endpoint: `api/devices/upload/audio`
+- Method: `POST`
+- Header: `x-device-token`
+- Multipart fields: `macAddress`, `audioWindowId`, `startedAt`, `durationSeconds`
+- File field: `audio`
+- Filename: `audio_<audioWindowId>.wav`
+- Content type: `audio/wav`
+- WAV format: 16 kHz, mono, 16-bit PCM
+- Duration: 5 seconds
+
+Install ALSA tools on Raspberry Pi OS:
+
+```bash
+sudo apt update
+sudo apt install -y alsa-utils
+```
+
+Test recording:
+
+```bash
+arecord -D default -t wav -f S16_LE -r 16000 -c 1 -d 5 test.wav
+aplay test.wav
+```
+
+Run one audio recording and upload:
+
+```bash
+python3 main.py --audio-upload
+```
+
+The full service runs heartbeat, frame upload, and audio upload independently:
+
+```bash
+python3 main.py
+```
+
+The audio queue is FIFO and disk-backed. It preserves insert order and does not replace older recordings. When the configured in-memory queue is full, new WAV and metadata files remain on disk and are loaded for later processing; the queue policy does not silently discard recordings. Failed uploads keep the WAV and metadata until an HTTP 2xx response. Successful uploads remove both.
+
 ## Verify
 
 ```bash
