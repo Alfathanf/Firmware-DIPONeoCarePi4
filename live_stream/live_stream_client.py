@@ -17,6 +17,12 @@ class LiveStreamClient:
         ping_timeout_seconds: float,
         on_binary: Optional[Callable[[bytes], None]] = None,
     ) -> None:
+        if ping_interval_seconds <= 0 or ping_timeout_seconds <= 0:
+            raise ValueError("WebSocket ping interval and timeout must be positive")
+        if ping_interval_seconds <= ping_timeout_seconds:
+            raise ValueError(
+                "WebSocket ping interval must be greater than ping timeout"
+            )
         self.url = url
         self.headers = headers
         self.ping_interval_seconds = ping_interval_seconds
@@ -102,6 +108,9 @@ class LiveStreamClient:
         logging.debug("[LIVE] WebSocket pong received")
 
     def send_binary(self, jpeg: bytes) -> bool:
+        if not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9"):
+            logging.error("[LIVE] Refusing to send a non-JPEG binary frame")
+            return False
         with self._lock:
             if not self.connected or self.connection is None:
                 return False

@@ -13,7 +13,7 @@ This project is a standalone Python 3 implementation for Raspberry Pi 4 device r
 - Retry network/server failures when running without `--once`.
 - Never print or store the token in source control or logs.
 
-Frame upload is implemented. Audio upload, live streaming, and AI processing remain intentionally unimplemented.
+Device registration, heartbeat, HTTP frame upload, audio upload, and WebSocket live streaming are implemented. AI processing is intentionally not performed on the Raspberry Pi.
 
 ## ESP32 registration contract
 
@@ -292,12 +292,12 @@ LIVE_STREAM_JPEG_QUALITY=80
 LIVE_STREAM_RECONNECT_BASE_SECONDS=1
 LIVE_STREAM_RECONNECT_MAX_SECONDS=30
 LIVE_STREAM_PING_INTERVAL_SECONDS=20
-LIVE_STREAM_PING_TIMEOUT_SECONDS=20
+LIVE_STREAM_PING_TIMEOUT_SECONDS=10
 LIVE_STREAM_MAX_PENDING_FRAMES=1
 ```
 
 Set `LIVE_STREAM_FPS=20` to test the advanced target. Actual capture and send FPS are logged every five seconds and are not assumed to equal the configured target.
 
-Live streaming uses one shared `CameraManager` instance with Picamera2 MJPEG capture. The latest-frame buffer keeps only one JPEG pending and replaces older frames. HTTP frame upload is not used as the live transport.
+Live streaming uses one shared `CameraManager` instance. Picamera2 continuously captures NV12 video and its `MJPEGEncoder` sends complete encoded JPEG frames to a bounded output callback. The callback rejects invalid or partial JPEGs; the latest-frame buffer keeps only one JPEG pending and replaces older frames. HTTP frame upload is not used as the live transport. On platforms without Picamera2's hardware MJPEG encoder, the software `JpegEncoder` is used with the configured quality; expect higher CPU usage.
 
-JPEG quality is configured through Picamera2's supported `camera.options["quality"]` encoder option. `JpegQuality` is not applied as a libcamera control because it is not an advertised control on OV5647/libcamera sensor pipelines.
+For the Pi 4 hardware encoder, `LIVE_STREAM_JPEG_QUALITY` selects the nearest of Picamera2's five named hardware quality levels, which control encoder bitrate rather than an exact JPEG quality number. The software encoder uses the configured 1–100 value directly. JPEG quality is never applied as a libcamera sensor control. WebSocket keepalive requires the ping interval to be greater than its timeout.

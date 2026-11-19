@@ -41,7 +41,7 @@ class Settings:
     live_stream_reconnect_base_seconds: float = 1.0
     live_stream_reconnect_max_seconds: float = 30.0
     live_stream_ping_interval_seconds: float = 20.0
-    live_stream_ping_timeout_seconds: float = 20.0
+    live_stream_ping_timeout_seconds: float = 10.0
     live_stream_max_pending_frames: int = 1
 
     @classmethod
@@ -92,7 +92,7 @@ class Settings:
             live_stream_reconnect_base = float(os.getenv("LIVE_STREAM_RECONNECT_BASE_SECONDS", "1"))
             live_stream_reconnect_max = float(os.getenv("LIVE_STREAM_RECONNECT_MAX_SECONDS", "30"))
             live_stream_ping_interval = float(os.getenv("LIVE_STREAM_PING_INTERVAL_SECONDS", "20"))
-            live_stream_ping_timeout = float(os.getenv("LIVE_STREAM_PING_TIMEOUT_SECONDS", "20"))
+            live_stream_ping_timeout = float(os.getenv("LIVE_STREAM_PING_TIMEOUT_SECONDS", "10"))
             live_stream_max_pending = int(os.getenv("LIVE_STREAM_MAX_PENDING_FRAMES", "1"))
         except ValueError as exc:
             raise ValueError("Numeric environment settings are invalid") from exc
@@ -131,6 +131,11 @@ class Settings:
             or live_stream_max_pending != 1
         ):
             raise ValueError("Frame, audio, and live stream settings must be positive")
+        if live_stream_ping_interval <= live_stream_ping_timeout:
+            raise ValueError(
+                "LIVE_STREAM_PING_INTERVAL_SECONDS must be greater than "
+                "LIVE_STREAM_PING_TIMEOUT_SECONDS"
+            )
 
         audio_storage_value = os.getenv(
             "AUDIO_STORAGE_DIR",

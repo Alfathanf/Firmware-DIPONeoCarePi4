@@ -86,8 +86,8 @@ class LiveStreamPublisher:
         self.capture_duration_total = 0.0
         self.jpeg_size_total = 0
         self.send_duration_total = 0.0
+        self._stats_lock = threading.Lock()
         self.reconnect_count = 0
-        self.capture_thread = None
         self.publisher_thread = None
 
     def stop(self) -> None:
@@ -121,50 +121,37 @@ class LiveStreamPublisher:
         )
 
         try:
-            self.camera.start(fps=self.settings.live_stream_fps)
+            self.camera.start_live_stream(
+                fps=self.settings.live_stream_fps,
+                on_frame=self._on_captured_frame,
+            )
         except CameraError as exc:
             logging.error("[LIVE] Camera unavailable: %s", exc)
             return
 
-        self.capture_thread = threading.Thread(
-            target=self._capture_loop,
-            name="live-capture",
-            daemon=True,
-        )
         self.publisher_thread = threading.Thread(
             target=self._publisher_loop,
             name="live-publisher",
             daemon=True,
         )
-        self.capture_thread.start()
         self.publisher_thread.start()
         self._stats_loop()
 
-    def _capture_loop(self) -> None:
-        interval = 1.0 / max(1, self.settings.live_stream_fps)
-        while not self.stop_event.is_set():
-            started = time.monotonic()
-            try:
-                jpeg = self.camera.capture_jpeg()
-                if not jpeg:
-                    raise CameraError("Captured live JPEG is empty")
-                self.sequence += 1
-                self.capture_count += 1
-                self.jpeg_size_total += len(jpeg)
-                self.buffer.put(
-                    LiveFrame(
-                        jpeg=jpeg,
-                        sequence=self.sequence,
-                        captured_monotonic=started,
-                    )
-                )
-            except CameraError as exc:
-                logging.error("[LIVE] Capture failed: %s", exc)
-
-            elapsed = time.monotonic() - started
+    def _on_captured_frame(self, jpeg: bytes) -> None:
+        started = time.monotonic()
+        self.sequence += 1
+        self.buffer.put(
+            LiveFrame(
+                jpeg=jpeg,
+                sequence=self.sequence,
+                captured_monotonic=started,
+            )
+        )
+        elapsed = time.monotonic() - started
+        with self._stats_lock:
+            self.capture_count += 1
+            self.jpeg_size_total += len(jpeg)
             self.capture_duration_total += elapsed
-            delay = max(0.0, interval - elapsed)
-            self.stop_event.wait(delay)
 
     def _publisher_loop(self) -> None:
         attempt = 0
@@ -215,9 +202,11 @@ class LiveStreamPublisher:
             started = time.monotonic()
             sent = self.client.send_binary(frame.jpeg)
             duration = time.monotonic() - started
-            self.send_duration_total += duration
+            with self._stats_lock:
+                self.send_duration_total += duration
             if sent:
-                self.send_count += 1
+                with self._stats_lock:
+                    self.send_count += 1
             else:
                 self.buffer.put(frame)
 
@@ -233,32 +222,41 @@ class LiveStreamPublisher:
                 self.stop_event.wait(remaining)
                 continue
             interval = 5.0
-            capture_fps = self.capture_count / interval
-            send_fps = self.send_count / interval
-            avg_capture = (
-                self.capture_duration_total / self.capture_count
-                if self.capture_count
-                else 0.0
-            )
-            avg_jpeg_kb = (
-                self.jpeg_size_total / self.capture_count / 1024
-                if self.capture_count
-                else 0.0
-            )
-            avg_send = (
-                self.send_duration_total / self.send_count
-                if self.send_count
-                else 0.0
-            )
+            with self._stats_lock:
+                capture_count = self.capture_count
+                send_count = self.send_count
+                avg_output = (
+                    self.capture_duration_total / capture_count
+                    if capture_count
+                    else 0.0
+                )
+                avg_jpeg_kb = (
+                    self.jpeg_size_total / capture_count / 1024
+                    if capture_count
+                    else 0.0
+                )
+                avg_send = (
+                    self.send_duration_total / send_count
+                    if send_count
+                    else 0.0
+                )
+                self.capture_count = 0
+                self.send_count = 0
+                self.capture_duration_total = 0.0
+                self.jpeg_size_total = 0
+                self.send_duration_total = 0.0
+            capture_fps = capture_count / interval
+            send_fps = send_count / interval
             process = psutil.Process()
             logging.info(
                 "[LIVE] Stats captureFPS=%.1f sendFPS=%.1f "
-                "avgCapture=%.3fs avgSend=%.3fs avgJPEG=%.1fKB "
+                "avgOutputCallback=%.3fs avgJPEGEncode=n/a "
+                "avgSend=%.3fs avgJPEG=%.1fKB "
                 "replaced=%d reconnects=%d cpu=%.1f%% ram=%.1fMB "
                 "connection=%s",
                 capture_fps,
                 send_fps,
-                avg_capture,
+                avg_output,
                 avg_send,
                 avg_jpeg_kb,
                 self.buffer.replaced,
@@ -267,9 +265,4 @@ class LiveStreamPublisher:
                 process.memory_info().rss / 1024 / 1024,
                 "connected" if self.client.connected else "disconnected",
             )
-            self.capture_count = 0
-            self.send_count = 0
-            self.capture_duration_total = 0.0
-            self.jpeg_size_total = 0
-            self.send_duration_total = 0.0
             next_stats = time.monotonic() + interval

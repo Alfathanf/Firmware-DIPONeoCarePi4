@@ -1,7 +1,9 @@
 import threading
 import unittest
+import os
 from unittest.mock import Mock, patch
 
+from config import Settings
 from live_stream.live_stream_client import LiveStreamClient
 from live_stream.live_stream_publisher import (
     LatestFrameBuffer,
@@ -31,7 +33,7 @@ class LiveStreamTests(unittest.TestCase):
                 "x-device-token": "raspi-token",
             },
             20,
-            20,
+            10,
         )
         self.assertEqual(
             client.headers["x-device-mac"],
@@ -63,7 +65,7 @@ class LiveStreamTests(unittest.TestCase):
                 "wss://example.test/live",
                 {"x-device-token": "raspi-token"},
                 20,
-                20,
+                10,
             )
             client.connected = True
             client.connection = Mock()
@@ -91,7 +93,7 @@ class LiveStreamTests(unittest.TestCase):
                 "wss://example.test/live",
                 {},
                 20,
-                20,
+                10,
             )
             connection = Mock()
             client.connection = connection
@@ -105,7 +107,7 @@ class LiveStreamTests(unittest.TestCase):
             "wss://example.test/live",
             {},
             20,
-            20,
+            10,
         )
         client.connected = True
         client._on_close(None, 1006, "disconnected")
@@ -116,10 +118,80 @@ class LiveStreamTests(unittest.TestCase):
             "wss://example.test/live",
             {},
             ping_interval_seconds=20,
-            ping_timeout_seconds=20,
+            ping_timeout_seconds=10,
         )
         self.assertEqual(client.ping_interval_seconds, 20)
-        self.assertEqual(client.ping_timeout_seconds, 20)
+        self.assertEqual(client.ping_timeout_seconds, 10)
+
+    def test_equal_ping_interval_and_timeout_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "must be greater"):
+            LiveStreamClient(
+                "wss://example.test/live",
+                {},
+                ping_interval_seconds=20,
+                ping_timeout_seconds=20,
+            )
+
+    def test_non_jpeg_binary_payload_is_rejected(self):
+        client = LiveStreamClient(
+            "wss://example.test/live",
+            {},
+            ping_interval_seconds=20,
+            ping_timeout_seconds=10,
+        )
+        client.connected = True
+        client.connection = Mock()
+
+        self.assertFalse(client.send_binary(b"raw-yuyv-frame"))
+        client.connection.send.assert_not_called()
+
+    def test_connect_does_not_start_duplicate_threads(self):
+        fake_websocket = Mock()
+        connection = Mock()
+        fake_websocket.WebSocketApp.return_value = connection
+        fake_thread = Mock()
+        with patch(
+            "live_stream.live_stream_client.websocket",
+            fake_websocket,
+        ), patch(
+            "live_stream.live_stream_client.threading.Thread",
+            return_value=fake_thread,
+        ) as thread_factory:
+            client = LiveStreamClient(
+                "wss://example.test/live",
+                {},
+                ping_interval_seconds=20,
+                ping_timeout_seconds=10,
+            )
+            client.connect()
+            client.connect()
+
+        thread_factory.assert_called_once()
+        fake_thread.start.assert_called_once()
+
+    def test_settings_validate_ping_relationship(self):
+        environment = {
+            "BACKEND_BASE_URL": "https://example.test/",
+            "LIVE_STREAM_PING_INTERVAL_SECONDS": "20",
+            "LIVE_STREAM_PING_TIMEOUT_SECONDS": "20",
+        }
+        with patch("config.load_dotenv"), patch.dict(os.environ, environment, clear=True):
+            with self.assertRaisesRegex(
+                ValueError,
+                "LIVE_STREAM_PING_INTERVAL_SECONDS must be greater",
+            ):
+                Settings.from_environment()
+
+    def test_settings_default_ping_timeout_is_ten_seconds(self):
+        with patch("config.load_dotenv"), patch.dict(
+            os.environ,
+            {"BACKEND_BASE_URL": "https://example.test/"},
+            clear=True,
+        ):
+            settings = Settings.from_environment()
+
+        self.assertEqual(settings.live_stream_ping_interval_seconds, 20)
+        self.assertEqual(settings.live_stream_ping_timeout_seconds, 10)
 
 
 if __name__ == "__main__":
