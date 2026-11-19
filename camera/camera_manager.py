@@ -33,6 +33,8 @@ class CameraManager:
                 return
             try:
                 camera = Picamera2()
+                if hasattr(camera, "options"):
+                    camera.options["quality"] = max(1, min(int(self.quality), 100))
                 config = camera.create_video_configuration(
                     main={
                         "size": (self.width, self.height),
@@ -47,7 +49,6 @@ class CameraManager:
                         frame_duration_us,
                         frame_duration_us,
                     ),
-                    "JpegQuality": self.quality,
                 })
                 camera.start()
                 self.camera = camera

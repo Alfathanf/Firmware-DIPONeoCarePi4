@@ -299,3 +299,5 @@ LIVE_STREAM_MAX_PENDING_FRAMES=1
 Set `LIVE_STREAM_FPS=20` to test the advanced target. Actual capture and send FPS are logged every five seconds and are not assumed to equal the configured target.
 
 Live streaming uses one shared `CameraManager` instance with Picamera2 MJPEG capture. The latest-frame buffer keeps only one JPEG pending and replaces older frames. HTTP frame upload is not used as the live transport.
+
+JPEG quality is configured through Picamera2's supported `camera.options["quality"]` encoder option. `JpegQuality` is not applied as a libcamera control because it is not an advertised control on OV5647/libcamera sensor pipelines.
