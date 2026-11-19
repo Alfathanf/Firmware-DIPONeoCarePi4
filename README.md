@@ -1,6 +1,6 @@
 # DIPONeoCare Raspberry Pi - Device Registration
 
-This project is a standalone Python 3 implementation for the Raspberry Pi 4 device-registration phase. It does not modify or replace the ESP32-S3 firmware.
+This project is a standalone Python 3 implementation for Raspberry Pi 4 device registration and heartbeat. It does not modify or replace the ESP32-S3 firmware.
 
 ## Implemented now
 
@@ -13,7 +13,7 @@ This project is a standalone Python 3 implementation for the Raspberry Pi 4 devi
 - Retry network/server failures when running without `--once`.
 - Never print or store the token in source control or logs.
 
-Heartbeats, frame upload, audio upload, camera use, live streaming, and AI processing are intentionally not implemented.
+Frame upload, audio upload, camera use, live streaming, and AI processing are intentionally not implemented.
 
 ## ESP32 registration contract
 
@@ -82,12 +82,47 @@ python3 main.py
 
 Stop retry mode with `Ctrl+C`.
 
+## Run heartbeat
+
+Send one heartbeat using only the saved Raspberry Pi identity:
+
+```bash
+python3 main.py --heartbeat
+```
+
+Run registration as needed, then continuously send heartbeats:
+
+```bash
+python3 main.py
+```
+
+The continuous mode uses the ESP32 heartbeat contract:
+
+- Endpoint: `api/devices/heartbeat`
+- Method: `POST`
+- Normal interval: 15 seconds
+- Payload:
+  ```json
+  {"macAddress":"DC:A6:32:12:34:56","localIp":"192.168.1.50"}
+  ```
+- Header: `x-device-token: <saved Raspberry Pi token>`
+
+The payload does not include `deviceId`; the ESP32 firmware authenticates with the token and uses HTTP success status. The Raspberry Pi uses the loaded saved `deviceId` for logging and validation only.
+
+Stop continuous mode with `Ctrl+C` or `SIGTERM`. Failure responses and network errors are retried without deleting the saved identity or repeating registration. HTTP 401/403 is reported as authentication failure.
+
 ## Verify
 
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -c "from device.identity import DeviceIdentity; i=DeviceIdentity.detect('1.0.0'); print(i)"
 ls -l data/device_identity.json
+```
+
+Use mocked requests for the automated heartbeat suite:
+
+```bash
+python3 -m unittest discover -s tests -v
 ```
 
 The registration log shows MAC, local IP, software version, and device ID, but not the device token. Running again should print "already registered" and make no HTTP request.
