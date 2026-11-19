@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+import io
 
 
 class CameraError(RuntimeError):
@@ -38,25 +38,47 @@ class CameraManager:
     def capture_jpeg(self) -> bytes:
         if self.camera is None:
             raise CameraError("Camera has not been initialized")
-        try:
-            return bytes(self.camera.capture_jpeg())
-        except TypeError:
-            try:
-                import io
-                from PIL import Image
 
-                frame = self.camera.capture_array()
-                output = io.BytesIO()
+        buffer = io.BytesIO()
+        try:
+            capture_file = getattr(self.camera, "capture_file", None)
+            if not callable(capture_file):
+                return self._capture_array_as_jpeg()
+
+            capture_file(buffer, format="jpeg")
+            jpeg = buffer.getvalue()
+            if not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9"):
+                raise CameraError("Picamera2 capture did not return valid JPEG bytes")
+            return jpeg
+        except CameraError:
+            raise
+        except Exception as exc:
+            raise CameraError(f"JPEG frame capture failed: {exc}") from exc
+        finally:
+            buffer.close()
+
+    def _capture_array_as_jpeg(self) -> bytes:
+        try:
+            from PIL import Image
+
+            frame = self.camera.capture_array()
+            output = io.BytesIO()
+            try:
                 Image.fromarray(frame).save(
                     output,
                     format="JPEG",
                     quality=self.quality,
                 )
-                return output.getvalue()
-            except Exception as exc:
-                raise CameraError(f"JPEG frame capture failed: {exc}") from exc
+                jpeg = output.getvalue()
+                if not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9"):
+                    raise CameraError("Captured frame did not produce valid JPEG bytes")
+                return jpeg
+            finally:
+                output.close()
+        except CameraError:
+            raise
         except Exception as exc:
-            raise CameraError(f"JPEG frame capture failed: {exc}") from exc
+            raise CameraError(f"JPEG frame capture fallback failed: {exc}") from exc
 
     def stop(self) -> None:
         if self.camera is not None:
@@ -64,4 +86,10 @@ class CameraManager:
                 self.camera.stop()
             except Exception as exc:
                 logging.warning("[FRAME] Camera stop warning: %s", exc)
+            try:
+                close = getattr(self.camera, "close", None)
+                if callable(close):
+                    close()
+            except Exception as exc:
+                logging.warning("[FRAME] Camera close warning: %s", exc)
             self.camera = None

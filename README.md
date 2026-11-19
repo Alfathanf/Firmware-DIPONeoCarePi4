@@ -173,6 +173,8 @@ rpicam-hello --timeout 3000
 python3 main.py --frame-upload
 ```
 
+Frame capture uses `Picamera2.capture_file()` with an in-memory `io.BytesIO` buffer and JPEG format. The implementation validates that the result starts with a JPEG SOI marker (`FF D8`) and ends with an EOI marker (`FF D9`) before placing it on the frame queue.
+
 ## Verify
 
 ```bash
