@@ -15,20 +15,23 @@ class FrameCaptureManager:
         mac_address: str,
         interval_seconds: float,
         stop_event: threading.Event,
+        start_camera: bool = True,
     ) -> None:
         self.camera = camera
         self.queue = queue
         self.mac_address = mac_address
         self.interval_seconds = interval_seconds
         self.stop_event = stop_event
+        self.start_camera = start_camera
         self.sequence = 0
 
     def run(self) -> None:
-        try:
-            self.camera.start()
-        except CameraError as exc:
-            logging.error("[FRAME] Camera unavailable: %s", exc)
-            return
+        if self.start_camera:
+            try:
+                self.camera.start()
+            except CameraError as exc:
+                logging.error("[FRAME] Camera unavailable: %s", exc)
+                return
 
         logging.info("[FRAME] Starting frame capture...")
         try:
@@ -74,4 +77,5 @@ class FrameCaptureManager:
                 delay = max(0.0, self.interval_seconds - elapsed)
                 self.stop_event.wait(delay)
         finally:
-            self.camera.stop()
+            if self.start_camera:
+                self.camera.stop()

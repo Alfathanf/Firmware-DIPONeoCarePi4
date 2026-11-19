@@ -16,6 +16,7 @@ from frame.frame_uploader import FrameUploader
 from audio.audio_queue import AudioQueue
 from audio.audio_recorder import AudioRecorder, AudioError
 from audio.audio_uploader import AudioUploader
+from live_stream.live_stream_publisher import LiveStreamPublisher
 
 
 def configure_logging() -> None:
@@ -108,6 +109,28 @@ def run_audio_upload_once(settings, manager, identity) -> int:
         return 1
 
 
+def run_live_stream_once(settings, manager, identity) -> int:
+    if not settings.live_stream_enabled:
+        logging.error("[LIVE] Live streaming is disabled")
+        return 1
+    stop_event = threading.Event()
+    publisher = LiveStreamPublisher(
+        settings,
+        manager,
+        identity,
+        stop_event,
+    )
+
+    def handle_stop(_signum, _frame) -> None:
+        logging.info("[LIVE] Shutdown requested.")
+        publisher.stop()
+
+    signal.signal(signal.SIGINT, handle_stop)
+    signal.signal(signal.SIGTERM, handle_stop)
+    publisher.run()
+    return 0
+
+
 def run_services(settings, manager, identity) -> int:
     heartbeat = HeartbeatService(settings, manager)
     frame_queue = FrameQueue(settings.frame_queue_max_size)
@@ -123,6 +146,7 @@ def run_services(settings, manager, identity) -> int:
         identity.mac_address,
         settings.frame_capture_interval_seconds,
         stop_event,
+        start_camera=not settings.live_stream_enabled,
     )
     uploader = FrameUploader(settings, frame_queue, stop_event, manager)
     audio_queue = AudioQueue(
@@ -141,11 +165,28 @@ def run_services(settings, manager, identity) -> int:
         stop_event,
         manager,
     )
+    live_publisher = None
+    live_thread = None
+    if settings.live_stream_enabled:
+        live_publisher = LiveStreamPublisher(
+            settings,
+            manager,
+            identity,
+            stop_event,
+            camera=camera,
+        )
+        live_thread = threading.Thread(
+            target=live_publisher.run,
+            name="live-stream",
+            daemon=True,
+        )
 
     def handle_stop(_signum, _frame) -> None:
         logging.info("[SHUTDOWN] Shutdown requested.")
         heartbeat.stop()
         stop_event.set()
+        if live_publisher is not None:
+            live_publisher.stop()
 
     signal.signal(signal.SIGINT, handle_stop)
     signal.signal(signal.SIGTERM, handle_stop)
@@ -180,8 +221,11 @@ def run_services(settings, manager, identity) -> int:
     uploader_thread.start()
     audio_capture_thread.start()
     audio_uploader_thread.start()
+    if live_thread is not None:
+        live_thread.start()
 
     stop_event.wait()
+    camera.stop()
     heartbeat_thread.join(timeout=2)
     capture_thread.join(timeout=2)
     uploader_thread.join(timeout=2)
@@ -214,6 +258,11 @@ def parse_args() -> argparse.Namespace:
         "--audio-upload",
         action="store_true",
         help="Record one WAV window and upload it once using saved identity",
+    )
+    parser.add_argument(
+        "--live-stream",
+        action="store_true",
+        help="Run live WebSocket streaming only",
     )
     return parser.parse_args()
 
@@ -248,6 +297,8 @@ def main() -> int:
             return run_frame_upload_once(settings, manager, registration, identity)
         if args.audio_upload:
             return run_audio_upload_once(settings, manager, identity)
+        if args.live_stream:
+            return run_live_stream_once(settings, manager, identity)
         if args.heartbeat:
             heartbeat = HeartbeatService(settings, manager)
             try:
@@ -290,6 +341,11 @@ def main() -> int:
     if args.audio_upload:
         logging.error(
             "[AUDIO] Saved Raspberry Pi identity is unavailable; --audio-upload does not register"
+        )
+        return 1
+    if args.live_stream:
+        logging.error(
+            "[LIVE] Saved Raspberry Pi identity is unavailable; --live-stream does not register"
         )
         return 1
     while True:

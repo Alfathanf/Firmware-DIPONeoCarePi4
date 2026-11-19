@@ -33,6 +33,16 @@ class Settings:
     audio_upload_timeout_seconds: float = 5.0
     audio_upload_retry_seconds: int = 5
     audio_storage_dir: Path = Path("data/audio")
+    live_stream_enabled: bool = True
+    live_stream_fps: int = 15
+    live_stream_width: int = 640
+    live_stream_height: int = 480
+    live_stream_jpeg_quality: int = 80
+    live_stream_reconnect_base_seconds: float = 1.0
+    live_stream_reconnect_max_seconds: float = 30.0
+    live_stream_ping_interval_seconds: float = 20.0
+    live_stream_ping_timeout_seconds: float = 20.0
+    live_stream_max_pending_frames: int = 1
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -75,6 +85,15 @@ class Settings:
             audio_queue_max_size = int(os.getenv("AUDIO_QUEUE_MAX_SIZE", "3"))
             audio_upload_timeout = float(os.getenv("AUDIO_UPLOAD_TIMEOUT_SECONDS", "5"))
             audio_upload_retry = int(os.getenv("AUDIO_UPLOAD_RETRY_SECONDS", "5"))
+            live_stream_fps = int(os.getenv("LIVE_STREAM_FPS", "15"))
+            live_stream_width = int(os.getenv("LIVE_STREAM_WIDTH", "640"))
+            live_stream_height = int(os.getenv("LIVE_STREAM_HEIGHT", "480"))
+            live_stream_jpeg_quality = int(os.getenv("LIVE_STREAM_JPEG_QUALITY", "80"))
+            live_stream_reconnect_base = float(os.getenv("LIVE_STREAM_RECONNECT_BASE_SECONDS", "1"))
+            live_stream_reconnect_max = float(os.getenv("LIVE_STREAM_RECONNECT_MAX_SECONDS", "30"))
+            live_stream_ping_interval = float(os.getenv("LIVE_STREAM_PING_INTERVAL_SECONDS", "20"))
+            live_stream_ping_timeout = float(os.getenv("LIVE_STREAM_PING_TIMEOUT_SECONDS", "20"))
+            live_stream_max_pending = int(os.getenv("LIVE_STREAM_MAX_PENDING_FRAMES", "1"))
         except ValueError as exc:
             raise ValueError("Numeric environment settings are invalid") from exc
 
@@ -100,8 +119,18 @@ class Settings:
             or audio_queue_max_size < 1
             or audio_upload_timeout <= 0
             or audio_upload_retry < 1
+            or live_stream_fps < 1
+            or live_stream_width < 1
+            or live_stream_height < 1
+            or live_stream_jpeg_quality < 1
+            or live_stream_jpeg_quality > 100
+            or live_stream_reconnect_base <= 0
+            or live_stream_reconnect_max < live_stream_reconnect_base
+            or live_stream_ping_interval <= 0
+            or live_stream_ping_timeout <= 0
+            or live_stream_max_pending != 1
         ):
-            raise ValueError("Frame and audio settings must be positive")
+            raise ValueError("Frame, audio, and live stream settings must be positive")
 
         audio_storage_value = os.getenv(
             "AUDIO_STORAGE_DIR",
@@ -138,4 +167,14 @@ class Settings:
             audio_upload_timeout_seconds=audio_upload_timeout,
             audio_upload_retry_seconds=audio_upload_retry,
             audio_storage_dir=audio_storage_dir,
+            live_stream_enabled=os.getenv("LIVE_STREAM_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+            live_stream_fps=live_stream_fps,
+            live_stream_width=live_stream_width,
+            live_stream_height=live_stream_height,
+            live_stream_jpeg_quality=live_stream_jpeg_quality,
+            live_stream_reconnect_base_seconds=live_stream_reconnect_base,
+            live_stream_reconnect_max_seconds=live_stream_reconnect_max,
+            live_stream_ping_interval_seconds=live_stream_ping_interval,
+            live_stream_ping_timeout_seconds=live_stream_ping_timeout,
+            live_stream_max_pending_frames=live_stream_max_pending,
         )

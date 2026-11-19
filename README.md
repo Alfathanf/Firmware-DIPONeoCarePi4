@@ -253,3 +253,49 @@ To test backend failure, stop or unreachable the network/backend and run `python
 - `device/registration.py`: registration response parsing and persistent identity storage.
 - `communication/api_client.py`: HTTP/HTTPS requests.
 - `camera/`, `audio/`, `storage/`: reserved for later phases.
+
+## Live WebSocket streaming
+
+Run live streaming only:
+
+```bash
+python3 main.py --live-stream
+```
+
+Run live streaming together with registration, heartbeat, frame upload, and audio upload:
+
+```bash
+python3 main.py
+```
+
+Live streaming uses the Raspberry Pi identity and sends JPEG bytes as binary WebSocket messages to:
+
+```text
+wss://diponeocare.up.railway.app/api/devices/{deviceId}/live/ingest
+```
+
+Handshake headers:
+
+```text
+x-device-mac: <Raspberry Pi MAC>
+x-device-token: <Raspberry Pi device token>
+```
+
+Default live settings:
+
+```env
+LIVE_STREAM_ENABLED=true
+LIVE_STREAM_FPS=15
+LIVE_STREAM_WIDTH=640
+LIVE_STREAM_HEIGHT=480
+LIVE_STREAM_JPEG_QUALITY=80
+LIVE_STREAM_RECONNECT_BASE_SECONDS=1
+LIVE_STREAM_RECONNECT_MAX_SECONDS=30
+LIVE_STREAM_PING_INTERVAL_SECONDS=20
+LIVE_STREAM_PING_TIMEOUT_SECONDS=20
+LIVE_STREAM_MAX_PENDING_FRAMES=1
+```
+
+Set `LIVE_STREAM_FPS=20` to test the advanced target. Actual capture and send FPS are logged every five seconds and are not assumed to equal the configured target.
+
+Live streaming uses one shared `CameraManager` instance with Picamera2 MJPEG capture. The latest-frame buffer keeps only one JPEG pending and replaces older frames. HTTP frame upload is not used as the live transport.
